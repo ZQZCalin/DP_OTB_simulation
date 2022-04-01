@@ -25,7 +25,7 @@ def online_to_batch(T, dimen, alpha, learner:Learner, env:Env):
 
     grad_est = np.zeros(dimen)  # gradient estimate $$g_t=g_{t-1}+\delta_t$$
 
-    tree_noise = np.random.normal(0, 0.01, (T, dimen))   # T x d, stores all noises in tree mechanism
+    tree_noise = np.random.normal(0, 10, (T, dimen))   # T x d, stores all noises in tree mechanism
 
     ML_losses = []
 
@@ -39,16 +39,30 @@ def online_to_batch(T, dimen, alpha, learner:Learner, env:Env):
         x = sum_x / sum_alpha
 
         # 2. compute delta_t, g_t, gamma_t
-        grad_diff = alpha(t) * env.get_grad(x, t) - alpha(t-1) * env.get_grad(x_prev, t)
+        grad_now = env.get_grad(x, t)
+        grad_prev = env.get_grad(x_prev, t)
+        if t == 1:
+            grad_diff = alpha(t) * grad_now
+        else:
+            grad_diff = alpha(t) * grad_now - alpha(t-1) * grad_prev
         grad_est += grad_diff
         noise = np.sum(tree_noise[get_parent_nodes(t)], axis=0).ravel()
 
+        """testing mode"""
+        if False:
+            print(f"x: {x}; x_prev: {x_prev}")
+            print(f"grad_now: {grad_now}")
+            print(f"grad_prev: {grad_prev}")
+            print(f"grad_diff: {grad_diff}")
+            print(f"grad_est: {grad_est}")
+            print(f"noise: {noise}")
+            print("="*40)
+
         # 3. send loss to online learner and update
-        """A few ways to implement linear loss fed to online learner (for test purpose),
-        and the first two seem to experience high numerical instability."""
-        # OL_loss = LinearLoss(grad_est + noise)              # noised gradient difference methodd
-        # OL_loss = LinearLoss(grad_est)                      # un-noised gradient difference method
-        OL_loss = LinearLoss(alpha(t)*env.get_grad(x, t))   # anytime OTB
+        """A few ways to implement linear loss fed to online learner (for test purpose)."""
+        OL_loss = LinearLoss(grad_est + noise)              # noised gradient difference methodd
+        # OL_loss = LinearLoss(grad_est)                      # un-noised gradient difference method (stable)
+        # OL_loss = LinearLoss(alpha(t)*env.get_grad(x, t))   # anytime OTB (stable)
         learner.update(OL_loss)
 
         # 4. performance analysis
@@ -58,12 +72,16 @@ def online_to_batch(T, dimen, alpha, learner:Learner, env:Env):
 
 # test
 if __name__ == "__main__":
-    print("=====testing=====")
+    print("="*50)
+    print("start testing...")
 
-    T = 10000
+    T = 100000
     dimen = 2   # including bias term 
-    alpha = lambda t : 1
-    learner = OSD(dimen, lr=1/math.sqrt(T))
+    alpha = lambda t : t
+    """we need to re-tune the step-size for most learners.
+    If we set alpha_t=t, then eta=T^{-3/2} so that $$R_T(u)/\alpha_{1:T} = O(T^{-1/2})$$"""
+    lr = 1/T**1.5
+    learner = OSD(dimen, lr=lr)
 
     """test on simple function y = x-5 with square error"""
 
@@ -75,9 +93,10 @@ if __name__ == "__main__":
     y = X-5
     """
 
-    X = np.random.uniform(-10,10, (T))
-    y = X - 5
-
+    # random sampling
+    a = 1; b = -5
+    X = np.random.uniform(0, 10, (T))
+    y = a*X + b
     X = X.reshape((T,1))
 
     env = LinearRegression(X, y)
@@ -85,9 +104,10 @@ if __name__ == "__main__":
     x_final, ML_losses = online_to_batch(T, dimen, alpha, learner, env)
     print("="*50)
     print("online-to-batch completed")
-    print(x_final)
+    print(f"final weight is: {x_final} (should be {(a,b)})")
 
     plt.yscale("log")
     plt.xscale("log")
-    plt.plot(np.arange(T), ML_losses)
+    start = 1000
+    plt.plot(np.arange(start, T), ML_losses[start:])
     plt.show()
